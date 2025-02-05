@@ -1198,6 +1198,7 @@ let UiHelper = (function ($win, $doc) {
 
         // Handle subdirectory clicks
         popupBox.addEventListener('click', (e) => {
+            e.stopPropagation();
             const subdirItem = e.target.closest('.subdir-item');
             if (!subdirItem) return;
 
@@ -1238,6 +1239,11 @@ let UiHelper = (function ($win, $doc) {
                 })).init();
             }
             popupBox.style.display = 'none';
+        });
+
+        // Add this new event listener to prevent clicks on the dropdown from propagating
+        popupBox.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
         });
 
         // Add config button to existing context menu if it doesn't exist yet
