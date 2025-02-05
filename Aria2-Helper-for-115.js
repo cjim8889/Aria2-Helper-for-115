@@ -10,6 +10,8 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_log
 // @grant        GM_notification
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @grant        unsafeWindow
 // @license      MIT
 // @connect      *
@@ -34,17 +36,294 @@
 /* jshint -W097 */
 'use strict';
 
-// Configs
+// Add CSS styles for the config modal
+const modalStyles = `
+.aria2-config-modal {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.aria2-config-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 50%;
+    border-radius: 5px;
+}
+
+.aria2-config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.aria2-config-close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.aria2-config-close:hover {
+    color: black;
+}
+
+.aria2-config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.aria2-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.aria2-config-field label {
+    font-weight: bold;
+}
+
+.aria2-config-field input[type="text"],
+.aria2-config-field input[type="password"] {
+    padding: 5px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+
+.aria2-config-field input[type="checkbox"] {
+    margin-right: 5px;
+}
+
+.aria2-config-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.aria2-config-button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.aria2-config-save {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.aria2-config-cancel {
+    background-color: #f44336;
+    color: white;
+}
+
+.aria2-wrapper {
+    position: relative;
+}
+
+.aria2-subdir-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1000;
+    display: none;
+}
+
+.aria2-wrapper:hover .aria2-subdir-panel {
+    display: block;
+}
+`;
+
+// Add the styles to the document
+const styleSheet = document.createElement("style");
+styleSheet.textContent = modalStyles;
+document.head.appendChild(styleSheet);
+
+// Add CSS styles for subdir dropdown
+const subdirStyles = `
+.aria2-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.subdir-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: white;
+    border: 1px solid #ddd;
+    z-index: 1000;
+    min-width: 150px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.subdir-dropdown:hover,
+.aria2-wrapper:hover .subdir-dropdown {
+    display: block;
+}
+
+.subdir-item {
+    padding: 5px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.subdir-item:hover {
+    background: #f0f0f0;
+}
+
+.subdir-input {
+    padding: 5px;
+    width: 200px;
+    margin-top: 5px;
+}
+`;
+
+// Add to existing styleSheet
+styleSheet.textContent += subdirStyles;
+
+// Config Modal HTML
+const configModalHTML = `
+<div id="aria2ConfigModal" class="aria2-config-modal">
+    <div class="aria2-config-content">
+        <div class="aria2-config-header">
+            <h2>Aria2 配置</h2>
+            <span class="aria2-config-close">&times;</span>
+        </div>
+        <form class="aria2-config-form" id="aria2ConfigForm">
+            <div class="aria2-config-field">
+                <label for="rpc_path">RPC 地址:</label>
+                <input type="text" id="rpc_path" name="rpc_path" placeholder="http://你的域名:你的端口/jsonrpc">
+            </div>
+            <div class="aria2-config-field">
+                <label for="rpc_token">RPC Token:</label>
+                <input type="password" id="rpc_token" name="rpc_token" placeholder="你的token">
+            </div>
+            <div class="aria2-config-field">
+                <label for="rpc_user">RPC 用户名 (可选):</label>
+                <input type="text" id="rpc_user" name="rpc_user">
+            </div>
+            <div class="aria2-config-field">
+                <label for="download_dir">下载目录:</label>
+                <input type="text" id="download_dir" name="download_dir" placeholder="/root/tg-upload-py/downloads">
+            </div>
+            <div class="aria2-config-field">
+                <label for="current_subdir">默认子目录:</label>
+                <input type="text" id="current_subdir" name="current_subdir" placeholder="默认为空">
+            </div>
+            <div class="aria2-config-field">
+                <label>
+                    <input type="checkbox" id="debug_mode" name="debug_mode">
+                    调试模式
+                </label>
+            </div>
+            <div class="aria2-config-field">
+                <label>
+                    <input type="checkbox" id="sync_clipboard" name="sync_clipboard">
+                    同步到剪贴板
+                </label>
+            </div>
+            <div class="aria2-config-field">
+                <label>
+                    <input type="checkbox" id="use_http" name="use_http">
+                    使用 HTTP (老版本 Aria2)
+                </label>
+            </div>
+            <div class="aria2-config-field">
+                <label>
+                    <input type="checkbox" id="notification" name="notification">
+                    开启通知
+                </label>
+            </div>
+            <div class="aria2-config-buttons">
+                <button type="button" class="aria2-config-button aria2-config-cancel">取消</button>
+                <button type="submit" class="aria2-config-button aria2-config-save">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+`;
+
+// Add modal to document
+document.body.insertAdjacentHTML('beforeend', configModalHTML);
+
+// Config management
 let Configs = {
-    'debug_mode': true, // 是否开启调试模式
-    "sync_clipboard": false, // 是否将下载链接同步到剪贴板，部分浏览器（如 Safari ）不支持
-    'use_http': false, // 115 下载链接是否从 https 转换为 http （老版本 Aria2 需要）
-    "rpc_path": 'http://你的域名:你的端口/jsonrpc', // RPC 地址
-    "rpc_user": '', // RPC 用户名（若设置密码，请填写至 token 项）
-    "rpc_token": '你的token', // RPC Token ，v1.18.4+ 支持，与用户名认证方式互斥
-    "notification": true, // 是否开启推送通知
+    'debug_mode': GM_getValue('debug_mode', true),
+    'sync_clipboard': GM_getValue('sync_clipboard', false),
+    'use_http': GM_getValue('use_http', false),
+    'rpc_path': GM_getValue('rpc_path', 'http://你的域名:你的端口/jsonrpc'),
+    'rpc_user': GM_getValue('rpc_user', ''),
+    'rpc_token': GM_getValue('rpc_token', '你的token'),
+    'notification': GM_getValue('notification', true),
+    'download_dir': GM_getValue('download_dir', '/root/tg-upload-py/downloads'),
+    'current_subdir': GM_getValue('current_subdir', ''),
+    'recent_subdirs': GM_getValue('recent_subdirs', []),
 };
 
+// Config modal management
+function initConfigModal() {
+    const modal = document.getElementById('aria2ConfigModal');
+    const form = document.getElementById('aria2ConfigForm');
+    const closeBtn = modal.querySelector('.aria2-config-close');
+    const cancelBtn = modal.querySelector('.aria2-config-cancel');
+
+    // Load current values
+    Object.keys(Configs).forEach(key => {
+        const input = document.getElementById(key);
+        if (input) {
+            if (input.type === 'checkbox') {
+                input.checked = Configs[key];
+            } else {
+                input.value = Configs[key];
+            }
+        }
+    });
+
+    // Close modal handlers
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    closeBtn.onclick = closeModal;
+    cancelBtn.onclick = closeModal;
+
+    window.onclick = function(event) {
+        if (event.target === modal) {
+            closeModal();
+        }
+    };
+
+    // Save config handler
+    form.onsubmit = function(e) {
+        e.preventDefault();
+        
+        Object.keys(Configs).forEach(key => {
+            const input = document.getElementById(key);
+            if (input) {
+                const value = input.type === 'checkbox' ? input.checked : input.value;
+                Configs[key] = value;
+                GM_setValue(key, value);
+            }
+        });
+
+        closeModal();
+        _notification('配置已保存');
+    };
+}
 
 // Crypto
 class MyRsa {
@@ -255,7 +534,7 @@ class Crypto115 {
 let crypto_115 = new Crypto115();
 
 // Debug Func
-let debug = Configs.debug_mode ? GM_log : function () {};
+let debug = Configs.debug_mode ? console.log : function () {};
 let emptyFunc = function () {};
 
 let _notification = function (msg) {
@@ -350,19 +629,64 @@ let Aria2RPC = (function ($win, $doc) {
             }
 
             // options
+            let finalOptions = {};
             if ('undefined' !== typeof options) {
-                reqParams.params.push(options);
+                finalOptions = {...options};
             }
-            debug(reqParams)
-            // send to aria2, @todo: support metalink?
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: Configs.rpc_path,
-                headers: rpcHeaders,
-                data: JSON.stringify(reqParams),
-                onload: loadHandler || emptyFunc,
-                onerror: errorHandler || emptyFunc
-            });
+
+            // Handle download directory
+            if (Configs.download_dir && Configs.download_dir.trim() !== '') {
+                let baseDir = Configs.download_dir.replace(/\/$/, '');
+                if (finalOptions.dir && finalOptions.dir.trim() !== '') {
+                    // If there's a subdirectory specified, append it to the base directory
+                    finalOptions.dir = baseDir + '/' + finalOptions.dir.replace(/^\//, '');
+                } else {
+                    // If no subdirectory, just use the base directory
+                    finalOptions.dir = baseDir;
+                }
+            } else if (finalOptions.dir) {
+                // If no base directory but has subdir, use subdir directly
+                finalOptions.dir = finalOptions.dir.replace(/^\//, '');
+            }
+
+            // Add options to params if we have any
+            if (Object.keys(finalOptions).length > 0) {
+                reqParams.params.push(finalOptions);
+            }
+            
+            // If in debug mode, log information instead of sending request
+            if (Configs.debug_mode) {
+                console.group('Aria2 Debug Information');
+                console.log('Request URL:', Configs.rpc_path);
+                console.log('Request Headers:', rpcHeaders);
+                console.log('Request Parameters:', reqParams);
+                console.log('Download Link:', link);
+                console.log('Download Options:', finalOptions);
+                console.log('Final Download Directory:', finalOptions.dir || 'Using Aria2 Default');
+                console.groupEnd();
+                
+                // Simulate successful response for debug
+                if (loadHandler) {
+                    loadHandler({
+                        status: 200,
+                        responseText: JSON.stringify({
+                            id: reqParams.id,
+                            jsonrpc: '2.0',
+                            result: 'debug-gid-' + Math.random().toString(36).substr(2, 9)
+                        })
+                    });
+                }
+            } else {
+                // send to aria2
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: Configs.rpc_path,
+                    headers: rpcHeaders,
+                    data: JSON.stringify(reqParams),
+                    onload: loadHandler || emptyFunc,
+                    onerror: errorHandler || emptyFunc
+                });
+            }
         };
     }
 
@@ -436,6 +760,8 @@ let QueueManager = (function ($win, $doc) {
                 'status': '1' === node.getAttribute('file_type') ? STATUS_UNSTART : STATUS_DIR_UNPARSE
             };
         }, this);
+
+        this.subdir = Configs.current_subdir || '';
     }
 
     // static
@@ -519,7 +845,8 @@ let QueueManager = (function ($win, $doc) {
             Aria2RPC.add(this.queue[idx].link, {
                     'referer': $doc.URL,
                     'header': ['Cookie: ' + this.queue[idx].cookie, 'User-Agent: ' + $win.navigator.userAgent],
-                    'dir': GLOBAL_OPTION.dir + "/" + this.queue[idx].dir,
+                    'dir': this.subdir,
+                    'out': this.queue[idx].name
                 },
                 this.aria2DownloadHandler.bind(this, idx),
                 this.errorHandler.bind(this, STATUS_DOWNLOAD_FAILURE, idx)
@@ -773,46 +1100,180 @@ let QueueManager = (function ($win, $doc) {
 
 // UI Helper
 let UiHelper = (function ($win, $doc) {
-    // privates
     let _triggerId = 'aria2Trigger';
+    let _configTriggerId = 'aria2ConfigTrigger';
 
     function _clickHandler(evt) {
+        // If clicking a subdir item, handle subdir selection
+        if (evt.target.classList.contains('subdir-item')) {
+            evt.preventDefault();
+            if (evt.target.title === "新建子目录") {
+                const subdir = prompt('请输入子目录名称:', Configs.current_subdir);
+                if (subdir !== null) {
+                    Configs.current_subdir = subdir.trim();
+                    GM_setValue('current_subdir', Configs.current_subdir);
+                    updateRecentSubdirs(Configs.current_subdir);
+                }
+            } else {
+                Configs.current_subdir = evt.target.textContent.trim();
+                GM_setValue('current_subdir', Configs.current_subdir);
+                updateRecentSubdirs(Configs.current_subdir);
+            }
+            // Update the button title
+            evt.currentTarget.title = `当前子目录: ${Configs.current_subdir}\n点击发送至Aria2\n按住Alt点击仅复制链接\n按住Ctrl/Command点击直接下载`;
+            return;
+        }
 
+        // Main button click - proceed without prompt
         (new QueueManager({
             'directDownload': (evt.ctrlKey || evt.metaKey) && !evt.altKey,
             'copyOnly': evt.altKey && !evt.ctrlKey && !evt.metaKey,
         })).init();
-        console.log("evt: ", evt)
-        console.log('directDownload', (evt.ctrlKey || evt.metaKey) && !evt.altKey)
-        console.log('copyOnly', evt.altKey && !evt.ctrlKey && !evt.metaKey)
+    }
 
-        // kill the listener
-        evt.target.removeEventListener('click', _clickHandler, false);
+    function _configClickHandler() {
+        const modal = document.getElementById('aria2ConfigModal');
+        modal.style.display = 'block';
     }
 
     function _recordHandler(record) {
-        // place the trigger
+        // Add Aria2 button
         let ariaTrigger = $doc.createElement('li');
         ariaTrigger.id = _triggerId;
-        ariaTrigger.title = '点击发送至Aria2, 按住Ctrl(WIN)/Command(MAC)点击直接浏览器下载, 按住Alt点击仅复制下载链接';
-        ariaTrigger.innerHTML = '<i class="icon-operate ifo-share"></i><span>Aria2</span>';
-        // record.target.firstChild.appendChild(ariaTrigger);
-        record.target.firstChild.insertBefore(ariaTrigger, record.target.firstChild.firstChild);
-        record.target.childNodes[1].setAttribute("style", "display:none;")
-        // make it clickable
-        ariaTrigger.addEventListener('click', _clickHandler, false);
+        ariaTrigger.title = `当前子目录: ${Configs.current_subdir}\n点击发送至Aria2\n按住Alt点击仅复制链接\n按住Ctrl/Command点击直接下载`;
+        ariaTrigger.innerHTML = `
+            <i class="icon-operate ifo-share"></i>
+            <span>Aria2</span>
+        `;
 
-        // stop the observation
-        //_observer.disconnect();
+        // Create popup box for subdirectory selection
+        const popupBox = document.createElement('div');
+        popupBox.className = 'popup-box';
+        popupBox.setAttribute('data-dropdown-content', 'aria2_subdir');
+        popupBox.style.cssText = 'display: none; z-index: 9999999;';
+        popupBox.innerHTML = `
+            <em class="arrow-position" style="left:20px; right:auto">
+                <i class="arrow"></i>
+                <s class="arrow"></s>
+            </em>
+            <div class="operation-file">
+                <dl style="margin-top: 20px">
+                    <dt>
+                        <strong>子目录选择</strong>
+                        <div class="side">
+                            <div class="op-switch-wrap">
+                                <span>当前目录: ${Configs.current_subdir || '默认'}</span>
+                            </div>
+                        </div>
+                    </dt>
+                    <dd>
+                        <div class="list-filter" id="js_subdir_box">
+                            <a href="javascript:;" class="subdir-item" title="新建子目录" style="color: #666; font-weight: bold;">
+                                <i class="iofl-newfolder"></i>
+                                <span>新建子目录...</span>
+                            </a>
+                            ${(Configs.recent_subdirs || []).map(dir => `
+                                <a href="javascript:;" class="subdir-item" title="${dir}">
+                                    <i class="iofl-folder"></i>
+                                    <span>${dir}</span>
+                                </a>
+                            `).join('')}
+                        </div>
+                    </dd>
+                </dl>
+            </div>
+        `;
+
+        // Add event listeners for popup
+        ariaTrigger.addEventListener('mouseenter', () => {
+            const rect = ariaTrigger.getBoundingClientRect();
+            popupBox.style.left = (rect.left - 30) + 'px';
+            popupBox.style.top = (rect.bottom + 8) + 'px';
+            popupBox.style.display = 'block';
+        });
+
+        popupBox.addEventListener('mouseleave', () => {
+            popupBox.style.display = 'none';
+        });
+
+        // Handle subdirectory clicks
+        popupBox.addEventListener('click', (e) => {
+            const subdirItem = e.target.closest('.subdir-item');
+            if (!subdirItem) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const title = subdirItem.title;
+            if (title === '新建子目录') {
+                const subdir = prompt('请输入子目录名称:', Configs.current_subdir);
+                if (subdir !== null) {
+                    Configs.current_subdir = subdir.trim();
+                    GM_setValue('current_subdir', Configs.current_subdir);
+                    updateRecentSubdirs(Configs.current_subdir);
+                    // Update current directory display
+                    const currentDirSpan = popupBox.querySelector('.op-switch-wrap span');
+                    currentDirSpan.textContent = `当前目录: ${Configs.current_subdir || '默认'}`;
+                    // Update trigger title
+                    ariaTrigger.title = `当前子目录: ${Configs.current_subdir}\n点击发送至Aria2\n按住Alt点击仅复制链接\n按住Ctrl/Command点击直接下载`;
+                    // Trigger download after setting new subdir
+                    (new QueueManager({
+                        'directDownload': false,
+                        'copyOnly': false,
+                    })).init();
+                }
+            } else {
+                Configs.current_subdir = title;
+                GM_setValue('current_subdir', Configs.current_subdir);
+                updateRecentSubdirs(Configs.current_subdir);
+                // Update current directory display
+                const currentDirSpan = popupBox.querySelector('.op-switch-wrap span');
+                currentDirSpan.textContent = `当前目录: ${Configs.current_subdir || '默认'}`;
+                // Update trigger title
+                ariaTrigger.title = `当前子目录: ${Configs.current_subdir}\n点击发送至Aria2\n按住Alt点击仅复制链接\n按住Ctrl/Command点击直接下载`;
+                // Trigger download after selecting subdir
+                (new QueueManager({
+                    'directDownload': false,
+                    'copyOnly': false,
+                })).init();
+            }
+            popupBox.style.display = 'none';
+        });
+
+        // Add config button to existing context menu if it doesn't exist yet
+        const leftMoreMenu = $doc.querySelector('#js_context_menu_box [data-dropdown-content="left_more_menu"] .cell-icon');
+        if (leftMoreMenu && !$doc.getElementById(_configTriggerId)) {
+            leftMoreMenu.insertAdjacentHTML('beforeend', `
+                <a href="javascript:;" id="${_configTriggerId}">
+                    <i class="icon-operate ifo-settings"></i>
+                    <span>Aria2配置</span>
+                </a>
+            `);
+            // Add click event listener for config button
+            $doc.getElementById(_configTriggerId).addEventListener('click', _configClickHandler);
+        }
+
+        // Insert elements
+        record.target.firstChild.insertBefore(ariaTrigger, record.target.firstChild.firstChild);
+        document.querySelector('.wrap-vflow').appendChild(popupBox);
+        record.target.childNodes[1].setAttribute("style", "display:none;");
+        
+        // Add click event listener for aria trigger
+        ariaTrigger.addEventListener('click', _clickHandler);
 
         return true;
     }
 
-    // initialization
     function _init() {
         let container = $doc.getElementById('js_operate_box');
+        initConfigModal();
 
-        // create a observer on the container
+        // Initialize recent_subdirs if it doesn't exist
+        if (!Configs.recent_subdirs) {
+            Configs.recent_subdirs = [];
+            GM_setValue('recent_subdirs', []);
+        }
+
         new MutationObserver(function (records) {
             records.filter(function () {
                 return null === $doc.getElementById(_triggerId);
@@ -820,10 +1281,10 @@ let UiHelper = (function ($win, $doc) {
         }).observe(container, {
             'childList': true,
         });
+        
         Aria2RPC.getGlobalOption(
             function (resp) {
                 if (200 === resp.status && 'responseText' in resp) {
-                    // update the status
                     GLOBAL_OPTION = JSON.parse(resp.responseText)["result"]
                     debug(GLOBAL_OPTION)
                 }
@@ -833,10 +1294,17 @@ let UiHelper = (function ($win, $doc) {
     }
 
     return {
-        // public
         init: _init
     };
 })(unsafeWindow, unsafeWindow.document);
 
 // fire
 UiHelper.init();
+
+function updateRecentSubdirs(newSubdir) {
+    let recent = Configs.recent_subdirs.filter(dir => dir !== newSubdir);
+    recent.unshift(newSubdir);
+    if (recent.length > 10) recent.pop();
+    Configs.recent_subdirs = recent;
+    GM_setValue('recent_subdirs', recent);
+}
